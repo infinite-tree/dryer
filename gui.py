@@ -12,6 +12,7 @@ import threading
 
 
 # Local imports
+import control
 import data
 import widgets
 
@@ -23,7 +24,7 @@ IMG_DIR = os.path.join(BASE_DIR, "img")
 BACKGROUND_IMAGE = os.path.join(IMG_DIR, "dryer-screen.png")
 LOG_FILE = "~/logs/dryer_gui.log"
 
-SLEEP_DELAY = 1*60
+SLEEP_DELAY = 15*60
 SCREEN_ON = os.path.join(BASE_DIR, "screen-on.sh")
 SCREEN_OFF = os.path.join(BASE_DIR, "screen-off.sh")
 
@@ -39,6 +40,7 @@ class App(object):
         # self.Humidity = self.DataSource.queryCurrentHumidty()
         self.Temp = {}
         self.Humidity = {}
+        self.InSettings = False
         self.DataThread = threading.Thread(target=self.dataDaemon, args=(DATA_INTERVAL,), daemon=True)
         self.DataThread.start()
 
@@ -61,10 +63,12 @@ class App(object):
         self.Clock = pygame.time.Clock()
 
         self.Background = pygame.image.load(BACKGROUND_IMAGE)
-        self.PowerButton = widgets.PowerButton((SCREEN_SIZE[0]-55, 5))
+        self.PowerButton = widgets.PowerButton((SCREEN_SIZE[0]-55, 5), self.handlePower)
+        self.SettingsButton = widgets.SettingsButton((SCREEN_SIZE[0] - (55*2),5), self.handleSettings)
         self.Font = pygame.font.SysFont("avenir", 18)
         self.Outdoor = self.Font.render("Outdoor", 1, widgets.BLACK)
 
+        self.ControlPanel = control.Control(self.Log, self.Screen, self.handleSettings)
 
         #
         # Sensor Widgets
@@ -92,17 +96,22 @@ class App(object):
         self.DisplayObjects.append(t8)
         self.DisplayObjects.append(t9)
 
-        self.TimerControl = widgets.TimerControl((250,5))
+        self.TimerControl = widgets.TimerControl((250,5),
+                                                 self.ControlPanel.handleStart,
+                                                 self.ControlPanel.handleStop)
         # Position will get updated on first render
         self.StartStop = widgets.StartStopButton((250,5), self.TimerControl.start, self.TimerControl.stop)
 
 
     def dataDaemon(self, interval):
         while True:
-            self.Temp = self.DataSource.queryCurrentTemps()
-            self.Humidity = self.DataSource.queryCurrentHumidty()
-            self.Log.debug("DataDaemon: %s, %s"%(self.Temp, self.Humidity))
-            time.sleep(interval)
+            try:
+                self.Temp = self.DataSource.queryCurrentTemps()
+                self.Humidity = self.DataSource.queryCurrentHumidty()
+                self.Log.debug("DataDaemon: %s, %s"%(self.Temp, self.Humidity))
+                time.sleep(interval)
+            except Exception as e:
+                self.Log.error("Daemon error: %s"%str(e))
 
     def getTempAndHumidity(self, sensor):
         t = str(self.Temp.get(sensor, "N/A"))
@@ -116,15 +125,28 @@ class App(object):
         # self.Log.debug("Sensor data: %s, %s, %s"%(sensor, t, h))
         return (t,h)
 
+    def handlePower(self):
+        if self.Sleeping:
+            self.wakeUp()
+        else:
+            self.sleep()
+            time.sleep(0.5)
+
     def wakeUp(self):
+        self.Log.info("Wakeup!")
         self.Sleeping = False
         if PRODUCTION:
             subprocess.run(SCREEN_ON, shell=True)
 
     def sleep(self):
+        self.Log.info("Sleeping")
         self.Sleeping = True
         if PRODUCTION:
             subprocess.run(SCREEN_OFF, shell=False)
+
+    def handleSettings(self):
+        # Toggle settings mode
+        self.InSettings = not self.InSettings
 
     def handleEvents(self):
         now = time.time()
@@ -146,15 +168,18 @@ class App(object):
             if event.type == QUIT:
                 return False
 
-            if event.type == MOUSEBUTTONDOWN:
-                self.LastMovement = now
-                # Handle power button
-                # print("Button press event: %d,%d"%event.pos)
-                self.PowerButton.handleClick(event.pos)
-                self.Log.debug("Event pos: %d,%d"%(event.pos))
-                self.Log.debug("Start Rect: %s"%(self.StartStop.Rectangle))
-                self.StartStop.handleClick(event.pos)
-                pygame.event.clear()
+            if self.InSettings:
+                self.ControlPanel.handleEvent(event)
+            else:
+                if event.type == MOUSEBUTTONDOWN:
+                    self.LastMovement = now
+                    # self.Log.debug("Event pos: %d,%d"%(event.pos))
+                    # self.Log.debug("Start Rect: %s"%(self.StartStop.Rectangle))
+                    self.PowerButton.handleClick(event.pos)
+                    self.SettingsButton.handleClick(event.pos)
+                    self.StartStop.handleClick(event.pos)
+
+            pygame.event.clear()
 
         if now - self.LastMovement > SLEEP_DELAY and not self.Sleeping:
             self.sleep()
@@ -167,15 +192,20 @@ class App(object):
             if not self.handleEvents():
                 return
 
-            self.Screen.blit(self.Background, (0,0))
-            self.Screen.blit(self.Outdoor, (35,7))
-            self.PowerButton.render(self.Screen)
-            self.TimerControl.render(self.Screen)
-            self.StartStop.Position = (250+self.TimerControl.Rectangle.size[0], 5)
-            self.StartStop.render(self.Screen)
 
-            for d in self.DisplayObjects:
-                d.render(self.Screen)
+            if self.InSettings:
+                self.ControlPanel.render()
+            else:
+                self.Screen.blit(self.Background, (0,0))
+                self.Screen.blit(self.Outdoor, (35,7))
+                self.PowerButton.render(self.Screen)
+                self.SettingsButton.render(self.Screen)
+                self.TimerControl.render(self.Screen)
+                self.StartStop.Position = (250+self.TimerControl.Rectangle.size[0], 5)
+                self.StartStop.render(self.Screen)
+
+                for d in self.DisplayObjects:
+                    d.render(self.Screen)
 
             pygame.display.flip()
 

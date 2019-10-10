@@ -5,7 +5,11 @@ import time
 
 IMG_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "img")
 POWER_BTN = os.path.join(IMG_DIR, "power-btn.png")
+RETURN_BTN = os.path.join(IMG_DIR, "return.png")
+SETTINGS_BTN = os.path.join(IMG_DIR, "settings.png")
 TEMP_BADGE = os.path.join(IMG_DIR, "temp-badge.png")
+UP_BTN = os.path.join(IMG_DIR, "up.png")
+DOWN_BTN = os.path.join(IMG_DIR, "down.png")
 
 
 WHITE = (255, 255, 255)
@@ -14,10 +18,12 @@ BLACK = (0, 0, 0)
 
 
 class ImageButton(object):
-    def __init__(self, position, image_filename):
-        self.Image = pygame.image.load(image_filename)
+    ImageFile = None
+    def __init__(self, position, handler):
+        self.Image = pygame.image.load(self.ImageFile)
         self.Position = position
         self.Rect = self.Image.get_rect().move(position)
+        self.Handler = handler
 
     def render(self, surface, pos=None):
         if pos:
@@ -27,20 +33,33 @@ class ImageButton(object):
         surface.blit(self.Image, self.Position)
 
     def handleClick(self, event_pos):
-        print("Rect: %s, pos: %s"%(self.Rect, event_pos))
+        # print("Rect: %s, pos: %s"%(self.Rect, event_pos))
         if self.Rect.collidepoint(event_pos):
             self.callback()
+            return True
+        return False
 
     def callback(self):
-        return
+        self.Handler()
 
 
 class PowerButton(ImageButton):
-    def __init__(self, position):
-        ImageButton.__init__(self, position, POWER_BTN)
+    ImageFile = POWER_BTN
 
-    def callback(self):
-        print("POWER BUTTON PRESSED")
+
+class ReturnButton(ImageButton):
+    ImageFile = RETURN_BTN
+
+class SettingsButton(ImageButton):
+    ImageFile = SETTINGS_BTN
+
+
+class UpButton(ImageButton):
+    ImageFile = UP_BTN
+
+
+class DownButton(ImageButton):
+    ImageFile = DOWN_BTN
 
 
 class TempAndHumidity(object):
@@ -111,7 +130,7 @@ class StartStopButton(object):
         self.Rectangle = pygame.Rect(self.Position[0], self.Position[1], size[0], size[1])
 
     def handleClick(self, event_pos):
-        print("Rect: %s, pos: %s"%(self.Rectangle, event_pos))
+        # print("Rect: %s, pos: %s"%(self.Rectangle, event_pos))
         if self.Rectangle.collidepoint(event_pos):
             if self.On:
                 self.On = False
@@ -122,8 +141,10 @@ class StartStopButton(object):
 
 
 class TimerControl(object):
-    def __init__(self, position):
+    def __init__(self, position, start_handler, stop_handler):
         self.Position = position
+        self.StartHandler = start_handler
+        self.StopHandler = stop_handler
         self.StartTime = None
         self.Running = False
         self.Font = pygame.font.SysFont("avenir", 48)
@@ -131,10 +152,12 @@ class TimerControl(object):
     def start(self):
         self.StartTime = time.time()
         self.Running = True
+        self.StartHandler()
 
     def stop(self):
         self.StartTime = None
         self.Running = False
+        self.StopHandler()
 
     def render(self, surface):
         if self.Running:
