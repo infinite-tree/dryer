@@ -304,6 +304,90 @@ class BlowerControl(object):
         return
 
 
+class RecirculationControl(object):
+    def __init__(self, position, log, dmx_connection, channel, update_handler):
+        self.Position = position
+        self.Log = log
+        self.Dmx = dmx_connection
+        self.Channel = channel
+        self.UpdateHandler = update_handler
+
+        self.Size = (400,240)
+        self.Font = pygame.font.SysFont("avenir", 36)
+        self.Text = self.Font.render("Recirculation", 1, widgets.BLACK)
+        self.TextSize = self.Text.get_size()
+
+        self.LineEnd = (self.Size[0]-180, self.Size[1]-20)
+        self.ControlRadius = 115
+        self.AngleLimit = (3.6, 4.9)
+        self.BlowerLimit = (0, 255)
+
+        self.UpButton = widgets.UpButton((self.Size[0]-55, 60), self.handleUp)
+        self.DownButton = widgets.DownButton((self.Size[0]-55, self.Size[1]-60), self.handleDown)
+        self.Increment = 13
+
+    def handleUp(self):
+        v = self.Dmx.getValue(self.Channel)
+        v = min(self.BlowerLimit[1], v+self.Increment)
+        self.Dmx.setValue(self.Channel, v)
+        self.UpdateHandler()
+
+    def handleDown(self):
+        v = self.Dmx.getValue(self.Channel)
+        v = max(self.BlowerLimit[0], v-self.Increment)
+        self.Dmx.setValue(self.Channel, v)
+        self.UpdateHandler()
+
+    def handleEvent(self, event):
+        if hasattr(event, 'pos'):
+            event_pos = (event.pos[0]-self.Position[0],
+                         event.pos[1] - self.Position[1])
+
+        if event.type == MOUSEBUTTONDOWN:
+            if self.UpButton.handleClick(event_pos):
+                return True
+            if self.DownButton.handleClick(event_pos):
+                return True
+        return False
+
+    def renderWedge(self, surface, center, radius, start_angle, stop_angle):
+        p = [(center[0], center[1])]
+        for n in range(start_angle, stop_angle):
+            x = center[0] + int(radius*math.cos(n*math.pi/180))
+            y = center[1]+int(radius*math.sin(n*math.pi/180))
+            p.append((x, y))
+        p.append((center[0], center[1]))
+
+        # Draw pie segment
+        if len(p) > 2:
+            pygame.draw.polygon(surface, (0, 0, 0), p)
+
+    def render(self, surface):
+        base_surface = pygame.surface.Surface(self.Size)
+        pygame.draw.rect(base_surface, widgets.WHITE,
+                         (0, 0, self.Size[0], self.Size[1]))
+
+        base_surface.blit(self.Text, (self.Size[0]/2 - self.TextSize[0]/2, 10))
+
+        center = (int(self.Size[0]/2), int(self.Size[1]/2)+20)
+        radius = 75
+        pygame.draw.circle(base_surface, widgets.BLACK, center, radius, 2)
+
+        v = self.Dmx.getValue(self.Channel)
+        angle = int(scale(255-v, 0, 255, 0, 180))
+
+        # draw buttons
+        self.UpButton.render(base_surface)
+        self.DownButton.render(base_surface)
+
+        # draw line control
+        self.renderWedge(base_surface, center, radius, 0, angle)
+        self.renderWedge(base_surface, center, radius, 180, 180+angle)
+
+        surface.blit(base_surface, self.Position)
+        return
+
+
 class Control(object):
     def __init__(self, log, screen, return_handler):
         self.Log = log
@@ -318,8 +402,9 @@ class Control(object):
         self.handleStop()
 
         self.ReturnButton = widgets.ReturnButton((self.Size[0]-55, 5), self.handleReturn)
-        self.ManifoldControl = ManifoldControl((self.Size[0]/2 - 400/2, 0), self.Log, self.Dmx, UPPER_DAMPER, LOWER_DAMPER, self.updateDmx)
-        self.BlowerControl = BlowerControl((self.Size[0]/2 - 400/2, 241), self.Log, self.Dmx, BLOWER_VFD, self.updateDmx)
+        self.ManifoldControl = ManifoldControl((0, 0), self.Log, self.Dmx, UPPER_DAMPER, LOWER_DAMPER, self.updateDmx)
+        self.BlowerControl = BlowerControl((0, self.Size[1]/2+1), self.Log, self.Dmx, BLOWER_VFD, self.updateDmx)
+        self.RecirculationControl = RecirculationControl((self.Size[0]/2+1, self.Size[1]/2+1), self.Log, self.Dmx, EXHAUST_DAMPER, self.updateDmx)
 
     def handleStart(self):
         self.Running = True
@@ -344,13 +429,16 @@ class Control(object):
 
     def handleReturn(self):
         # flush any pending dmx updates
-        # self.Dmx.update()
+        if self.Running:
+            self.Dmx.update()
         self.ReturnHandler()
 
     def handleEvent(self, event):
         if self.ManifoldControl.handleEvent(event):
             return True
         if self.BlowerControl.handleEvent(event):
+            return True
+        if self.RecirculationControl.handleEvent(event):
             return True
 
         if event.type == MOUSEBUTTONDOWN:
@@ -363,5 +451,6 @@ class Control(object):
         self.ReturnButton.render(surface)
         self.ManifoldControl.render(surface)
         self.BlowerControl.render(surface)
+        self.RecirculationControl.render(surface)
 
         self.Screen.blit(surface, (0,0))
